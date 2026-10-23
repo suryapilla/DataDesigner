@@ -112,6 +112,38 @@ def test_validation_column_generator_generate_with_multiple_target_columns(mock_
     assert len(result["validation_column"]) == 2
 
 
+@patch("data_designer.engine.column_generators.generators.validation.get_validator_from_params", autospec=True)
+def test_validation_column_generator_generate_with_multiple_target_columns_keeps_per_row_results(
+    mock_get_validator: Mock, stub_resource_provider: Mock
+) -> None:
+    """Each target column validated separately must keep its own per-row results."""
+    mock_validator = Mock()
+    mock_validator.run_validation.side_effect = lambda batch: ValidationResult(
+        data=[ValidationOutput(is_valid="broken" not in next(iter(record.values()))) for record in batch]
+    )
+    mock_get_validator.return_value = mock_validator
+
+    config = ValidationColumnConfig(
+        name="validation_column",
+        validator_type=ValidatorType.CODE,
+        validator_params=CodeValidatorParams(code_lang=CodeLang.PYTHON),
+        target_columns=["code_a", "code_b"],
+    )
+
+    generator = ValidationColumnGenerator(config=config, resource_provider=stub_resource_provider)
+    df = lazy.pd.DataFrame(
+        {
+            "code_a": ["ok", "broken", "ok"],
+            "code_b": ["broken", "ok", "ok"],
+        }
+    )
+
+    result = generator.generate(df)
+
+    assert [r["code_a"]["is_valid"] for r in result["validation_column"]] == [True, False, True]
+    assert [r["code_b"]["is_valid"] for r in result["validation_column"]] == [False, True, True]
+
+
 @pytest.mark.parametrize(
     "error_message,expected_match",
     [
